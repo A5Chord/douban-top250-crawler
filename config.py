@@ -22,7 +22,7 @@ PLOT_SIZE = (10, 6)  # 图表尺寸(宽, 高)
 BAR_COLOR = '#3498db'  # 柱状图颜色
 
 # 数据解析配置
-COUNTRY_FILTER = []  # 国家/地区筛选配置（可选）
+COUNTRY_FILTER = ['中国']  # 国家/地区筛选配置（可选）
 MIN_YEAR = 1900  # 最小有效年份
 MAX_ITEMS = 250  # 最大爬取数量
 ITEMS_PER_PAGE = 25  # 每页项目数

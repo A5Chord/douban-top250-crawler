@@ -1,9 +1,9 @@
 """
 豆瓣电影Top250爬虫与分析系统
 主要功能：
-1. 爬取电影基本信息
+1. 爬取电影基本信息（国内中文电影名、导演、上映时间、豆瓣评分、参评人数）
 2. 存储为结构化CSV文件
-3. 进行基础数据分析与可视化
+3. 进行基础数据分析与可视化（导演上榜数量TOP5统计）
 """
 
 import logging
@@ -28,9 +28,6 @@ def ensure_dir_exists(path):
 
     Args:
         path (str): 文件或目录路径
-
-    Returns:
-        None
     """
     dir_path = os.path.dirname(path)
     if dir_path and not os.path.exists(dir_path):
@@ -136,7 +133,7 @@ class DoubanScraper:
             BeautifulSoup: 解析后的页面对象，失败返回None
         """
         try:
-            # 随机延迟和动态User-Agent
+            # 随机延迟和动态User-Agent（反爬策略）
             time.sleep(random.uniform(*DELAY_RANGE))
             headers = HEADERS.copy()
             headers['User-Agent'] = UserAgent().random
@@ -149,7 +146,7 @@ class DoubanScraper:
             )
             response.raise_for_status()  # 自动处理4xx/5xx状态码
 
-            # 检查反爬机制
+            # 检查反爬机制（是否跳转到登录页）
             if 'accounts.douban.com' in response.url:
                 raise requests.exceptions.RequestException("触发反爬机制")
 
@@ -163,7 +160,7 @@ class DoubanScraper:
             return None
 
     def _parse_movie(self, item):
-        """解析单个电影条目
+        """解析单个电影条目（核心解析逻辑）
 
         Args:
             item (bs4.element.Tag): 包含电影信息的HTML标签
@@ -172,7 +169,7 @@ class DoubanScraper:
             tuple: (电影数据字典, 是否被过滤)
         """
         try:
-            # 电影标题
+            # 电影标题（只取中文名）
             title_tag = item.find('span', class_='title')
             title = title_tag.text.strip() if title_tag else '无标题'
             title = title.split('/')[0].strip()  # 处理外语片名
@@ -182,7 +179,7 @@ class DoubanScraper:
             if not info:
                 return None, True  # 返回None和过滤标志
 
-            # 提取导演信息
+            # 提取导演信息（处理多种格式）
             director_p = info.find('p')
             if director_p:
                 director_text = director_p.get_text(strip=True)
@@ -193,7 +190,7 @@ class DoubanScraper:
                     for raw_name in director_match.group(1).split('/'):
                         name = raw_name.strip()
 
-                        # 优先提取中文部分
+                        # 优先提取中文部分（处理外国导演中文译名）
                         chinese_part = re.sub(r'([\u4e00-\u9fff·]+).*', r'\1', name)
                         # 如果没有中文则保留整个名字
                         final_name = chinese_part.strip() if re.search(r'[\u4e00-\u9fff]',
@@ -206,13 +203,12 @@ class DoubanScraper:
                 else:
                     director = '未知导演'
 
-                # 提取年份
+                # 提取年份（匹配4位数字）
                 year_match = re.search(r'\d{4}', director_text)
                 year = year_match.group() if year_match else ''
 
-                # 国家/地区筛选（模糊匹配）
+                # 国家/地区筛选（根据COUNTRY_FILTER配置）
                 p_text = director_p.get_text('\n', strip=True)
-                # 找到第一个换行后的内容（年份/国家/类型行）
                 lines = p_text.split('\n')
                 if len(lines) > 1:
                     country_line = lines[1]  # 例如："1994 / 美国 / 犯罪 剧情"
@@ -220,7 +216,7 @@ class DoubanScraper:
                     country_matches = re.findall(r'/\s*([^/\n]+?)\s*/', country_line)
                     if country_matches:
                         country = country_matches[-1].strip()  # 取最后一个匹配项为国家/地区
-                        # 如果配置了国家筛选且不匹配任何关键词，则标记为过滤
+                        # 如果配置了国家筛选且不匹配任何关键词，则过滤
                         if COUNTRY_FILTER and not any(
                                 keyword in country for keyword in COUNTRY_FILTER
                         ):
@@ -235,11 +231,11 @@ class DoubanScraper:
                 director = '未知导演'
                 year = ''
 
-            # 评分
+            # 评分（处理可能的缺失值）
             rating_tag = item.find('span', class_='rating_num')
             rating = float(rating_tag.text.strip()) if rating_tag else 0.0
 
-            # 评价人数
+            # 评价人数（清洗特殊字符）
             num_tag = item.find('span', string=re.compile(r'人评价'))
             if num_tag:
                 num_str = re.sub(r'[人评价,]', '', num_tag.text.strip())
@@ -260,7 +256,7 @@ class DoubanScraper:
             return None, True  # 异常情况返回None和过滤标志
 
     def scrape(self):
-        """执行爬取任务
+        """执行爬取任务（分页处理TOP250）
 
         Returns:
             list: 包含所有电影数据的字典列表
@@ -273,6 +269,7 @@ class DoubanScraper:
         # 构建完整的Top250页面URL
         top250_url = BASE_URL + "/top250"
 
+        # 分页处理（每页25条，共10页）
         for start in range(0, MAX_ITEMS, ITEMS_PER_PAGE):
             page_num = start // ITEMS_PER_PAGE + 1
             logging.info(f"正在处理第 {page_num} 页数据...")
@@ -303,18 +300,15 @@ class DoubanScraper:
         return movies
 
     def save_data(self, movies):
-        """保存数据到CSV文件
+        """保存数据到CSV文件（film_name.csv）
 
         Args:
             movies (list): 包含电影数据的字典列表
-
-        Returns:
-            None
         """
         df = pd.DataFrame(movies)
         df.index += 1  # 序号从1开始
 
-        # 数据清洗
+        # 数据清洗（处理异常值）
         df['上映时间'] = pd.to_numeric(df['上映时间'], errors='coerce')
         df = df[df['上映时间'].between(MIN_YEAR, pd.Timestamp.now().year)]
         df['参评人数'] = pd.to_numeric(df['参评人数'], errors='coerce')
@@ -322,20 +316,20 @@ class DoubanScraper:
         # 确保输出目录存在
         ensure_dir_exists(OUTPUT_CSV)
 
-        # 保存前再次去重
+        # 保存前再次去重（二次校验）
         df.drop_duplicates(subset=['中文电影名'], keep='first', inplace=True)
         df.to_csv(OUTPUT_CSV, encoding='utf-8-sig', index_label='序号')
         logging.info(f"数据已保存到 {OUTPUT_CSV}")
 
     def analyze(self):
-        """执行数据分析与可视化"""
+        """执行数据分析与可视化（导演上榜数量TOP5统计）"""
         try:
             df = pd.read_csv(OUTPUT_CSV, encoding='utf-8-sig')
 
             # 获取导演统计（包含处理并列情况）
             director_counts = df['导演'].value_counts()
 
-            # 获取第5名的值
+            # 获取第5名的值（处理并列排名）
             top5_value = director_counts.iloc[4] if len(director_counts) >= 5 else director_counts.min()
 
             # 获取所有达到或超过第5名值的导演
@@ -344,11 +338,11 @@ class DoubanScraper:
             # 按值降序排序
             top_directors = top_directors.sort_values(ascending=False)
 
-            # 可视化
+            # 可视化设置
             plt.figure(figsize=PLOT_SIZE)
             top_directors.plot(kind='bar', color=BAR_COLOR)
 
-            # 构建标题
+            # 构建标题（包含国家筛选信息）
             title = '豆瓣Top250电影导演上榜数量TOP5+'
             if COUNTRY_FILTER:
                 title += f'（国家/地区: {"、".join(COUNTRY_FILTER)}）'
@@ -356,9 +350,9 @@ class DoubanScraper:
             plt.title(title, fontsize=14)
             plt.xlabel('导演', fontsize=12)
             plt.ylabel('电影数量', fontsize=12)
-            plt.xticks(rotation=45 if len(top_directors) > 5 else 0)  # 如果并列多则旋转标签
+            plt.xticks(rotation=45 if len(top_directors) > 5 else 0)  # 动态调整标签旋转
 
-            # 添加数据标签
+            # 添加数据标签（增强可读性）
             for i, v in enumerate(top_directors):
                 plt.text(i, v + 0.2, str(v), ha='center')
 
